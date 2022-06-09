@@ -1,15 +1,31 @@
 import { useState, useEffect } from "react";
 import type { NextPage } from "next";
 import Head from "next/head";
-import { providers } from "ethers";
+import { Contract, providers } from "ethers";
 import styles from "../styles/Home.module.css";
 import { Web3Provider } from "@ethersproject/providers";
+import { WHITELIST_ADDRESS, ABI } from "../constants";
 
 const Home: NextPage = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [provider, setProvider] = useState<Web3Provider>();
   const [loading, setLoading] = useState(false);
   const [currentAccount, setCurrentAccount] = useState("");
+  const [isWhitelisted, setIsWhitelisted] = useState(false);
+  const [numWhitelisted, setNumWhitelisted] = useState(0);
+  const [errorMessage, setErrorMessage] = useState(false);
+
+  // Get the number of whitelisted addresses
+  const getNumberOfWhitelistedAddresses = async () => {
+    try {
+      const _provider = await getProviderOrSigner();
+      const whitelistContract = new Contract(WHITELIST_ADDRESS, ABI, _provider);
+      const _numWhitelisted = await whitelistContract.numAddressesWhitelisted();
+      setNumWhitelisted(_numWhitelisted);
+    } catch (e: any) {
+      setErrorMessage(e.message);
+    }
+  };
 
   // To automatically connect your wallet if you've connected before
   useEffect(() => {
@@ -24,9 +40,14 @@ const Home: NextPage = () => {
         setIsConnected(false);
       }
     };
-
+    const _provider = new providers.Web3Provider(window.ethereum);
+    setProvider(_provider);
     checkIfConnected();
   }, []);
+
+  useEffect(() => {
+    getNumberOfWhitelistedAddresses();
+  }, [isConnected]);
 
   // For handling account changes
   useEffect(() => {
@@ -52,6 +73,20 @@ const Home: NextPage = () => {
     };
   }, [isConnected, currentAccount]);
 
+  const getProviderOrSigner = async (needSigner = false) => {
+    const { chainId } = await provider?.getNetwork(); // Ignore the error, it exists
+    if (chainId !== 4) {
+      window.alert("Pls change to the Rinkeby test network");
+      return;
+    }
+
+    if (needSigner) {
+      const signer = provider?.getSigner();
+      return signer;
+    }
+
+    return provider;
+  };
 
   // Connect wallet
   const connectWallet = async () => {
@@ -59,10 +94,8 @@ const Home: NextPage = () => {
 
     try {
       await window.ethereum.request({ method: "eth_requestAccounts" });
-      const _provider = new providers.Web3Provider(window.ethereum);
-      setProvider(_provider);
 
-      const accounts = await _provider.listAccounts();
+      const accounts = await provider?.listAccounts();
       setCurrentAccount(accounts[0]);
 
       setIsConnected(true);
@@ -72,8 +105,32 @@ const Home: NextPage = () => {
     setLoading(false);
   };
 
-  const addAddressToWhitelist = async () => {
+  // Add address to whitelist
+  const joinWhitelist = async () => {
+    try {
+      const signer = await getProviderOrSigner(true);
+      const whitelistContract = new Contract(WHITELIST_ADDRESS, ABI, signer);
+      const tx = await whitelistContract.addAddressToWhitelist();
+      await tx.wait();
+      await getNumberOfWhitelistedAddresses();
+    } catch (e: any) {
+      setErrorMessage(e.message);
+      return;
+    }
+  };
 
+  const checkIfWhitelisted = async () => {
+    try {
+      const signer = await getProviderOrSigner(true);
+      const address = await signer?.getAddress();
+      const whitelistContract = new Contract(WHITELIST_ADDRESS, ABI, signer);
+      const _isWhitelisted = await whitelistContract.whitelistedAddresses(
+        address
+      );
+      setIsWhitelisted(_isWhitelisted);
+    } catch (e: any) {
+      setErrorMessage(e.message);
+    }
   };
 
   return (
@@ -90,7 +147,18 @@ const Home: NextPage = () => {
             {loading ? "Loading..." : "Connect"}
           </button>
         ) : (
-          <p>Connected with: {currentAccount}</p>
+          <>
+            <p>Connected with: {currentAccount}</p>
+            <button onClick={joinWhitelist}>Join Whitelist</button>
+            {numWhitelisted > 0 && (
+              <p>
+                {numWhitelisted} {`address${numWhitelisted !== 1 ? "es" : ""}`}{" "}
+                whitelisted.
+              </p>
+            )}
+
+            <button>Test button</button>
+          </>
         )}
       </main>
     </div>
